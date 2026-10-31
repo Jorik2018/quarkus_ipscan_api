@@ -7,6 +7,7 @@ pipeline {
         disableConcurrentBuilds()
     }
 
+
     environment {
         SERVICE_ID = 'quarkus_ipscan_api'
         SERVICE_NAME = 'Quarkus IP Scan API'
@@ -20,6 +21,67 @@ pipeline {
         PATH = "${JAVA_HOME}\\bin;${env.PATH}"
     }
 
+stage('Verify Vault') {
+    steps {
+        withCredentials([
+            string(
+                credentialsId: 'VAULT_TOKEN',
+                variable: 'VAULT_TOKEN'
+            )
+        ]) {
+            powershell '''
+                Write-Host "=============================="
+                Write-Host "===== Verify Vault ==========="
+                Write-Host "=============================="
+
+                if (-not $env:VAULT_ADDR) {
+                    throw "VAULT_ADDR not configured"
+                }
+
+                if (-not $env:VAULT_PATH) {
+                    throw "VAULT_PATH not configured"
+                }
+
+                if (-not $env:VAULT_TOKEN) {
+                    throw "VAULT_TOKEN not available"
+                }
+
+                $headers = @{
+                    "X-Vault-Token" = $env:VAULT_TOKEN
+                }
+
+                try {
+
+                    $response = Invoke-RestMethod `
+                        -Method Get `
+                        -Uri "$env:VAULT_ADDR/v1/$env:VAULT_PATH" `
+                        -Headers $headers `
+                        -TimeoutSec 10
+
+                    # KV v2
+                    $jwtPublicKey = $response.data.data.JWT_PUBLIC_KEY
+
+                    if (-not $jwtPublicKey) {
+                        throw "JWT_PUBLIC_KEY not found in Vault"
+                    }
+
+                    Write-Host "Vault connection OK"
+                    Write-Host "JWT_PUBLIC_KEY found"
+
+                    # IMPORTANTE:
+                    # No imprimir $jwtPublicKey
+
+                }
+                catch {
+                    Write-Host "Vault error:"
+                    Write-Host $_.Exception.Message
+
+                    throw "Could not load configuration from Vault"
+                }
+            '''
+        }
+    }
+}
     stages {
 
         stage('Checkout') {
@@ -183,6 +245,41 @@ stage('Cleanup Old Service') {
         '''
     }
 }
+
+stage('Configure Application') {
+    steps {
+        powershell '''
+            $template = "$env:WORKSPACE\\src\\main\\resources\\application.properties.example"
+            $output   = "$env:WORKSPACE\\src\\main\\resources\\application.properties"
+
+            if (-not (Test-Path $template)) {
+                throw "Template not found: $template"
+            }
+
+            Write-Host "Generating application.properties..."
+
+            $content = Get-Content $template -Raw
+
+            $content = $content.Replace(
+                '${PORT}',
+                $env:PORT
+            )
+
+            $content = $content.Replace(
+                '${JWT_PUBLIC_KEY}',
+                $env:JWT_PUBLIC_KEY
+            )
+
+            Set-Content `
+                -Path $output `
+                -Value $content `
+                -Encoding UTF8
+
+            Write-Host "application.properties generated."
+        '''
+    }
+}
+
         stage('Build') {
             steps {
                 bat '''

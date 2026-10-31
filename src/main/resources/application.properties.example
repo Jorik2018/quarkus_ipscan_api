@@ -1,2 +1,12 @@
-quarkus.http.port=9113
 quarkus.http.cors=true
+# Health publico
+quarkus.http.auth.permission.health.paths=/health
+quarkus.http.auth.permission.health.policy=permit
+
+# Todo lo demas requiere autenticacion
+quarkus.http.auth.permission.bearer.paths=/*
+quarkus.http.auth.permission.bearer.policy=authenticated
+quarkus.http.auth.permission.bearer.auth-mechanism=bearer
+
+# Clave publica para verificar JWT
+mp.jwt.verify.publickey.location=${JWT_PUBLIC_KEY}

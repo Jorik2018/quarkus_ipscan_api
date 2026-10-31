@@ -21,10 +21,9 @@ import io.smallrye.common.annotation.Blocking;
 
 @Path("")
 @Produces(MediaType.APPLICATION_JSON)
-public class GreetingResource {
+public class IPScannerResource {
 
-    private static final String SCANNER_PATH =
-            "D:\\Advanced IP Scanner\\advanced_ip_scanner_console.exe";
+    private static final String SCANNER_PATH = "D:\\Advanced IP Scanner\\advanced_ip_scanner_console.exe";
 
     private static final long SCAN_TIMEOUT_SECONDS = 120;
 
