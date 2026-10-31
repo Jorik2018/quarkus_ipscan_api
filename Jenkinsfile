@@ -109,6 +109,43 @@ pipeline {
             }
         }
 
+stage('Remove Old Service') {
+    steps {
+        bat '''
+            @echo off
+
+            echo ============================
+            echo ===== Remove Old Service ===
+            echo ============================
+
+            "%PYTHON_HOME%\\python.exe" ^
+                "%SERVICE_MANAGER%" ^
+                stop ^
+                "%SERVICE_ID%"
+
+            timeout /t 3 /nobreak >nul
+
+            "%PYTHON_HOME%\\python.exe" ^
+                "%SERVICE_MANAGER%" ^
+                uninstall ^
+                "%SERVICE_ID%"
+
+            timeout /t 3 /nobreak >nul
+
+            echo.
+            echo ===== Service status =====
+
+            sc query "%SERVICE_ID%"
+
+            echo.
+            echo ===== Port status =====
+
+            netstat -ano | findstr ":%PORT%"
+
+            exit /b 0
+        '''
+    }
+}
         stage('Build') {
             steps {
                 bat '''
