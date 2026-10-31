@@ -385,7 +385,7 @@ stage('Cleanup Old Service') {
 stage('Health Check') {
     steps {
         powershell '''
-            $url = "http://127.0.0.1:$env:PORT/json/"
+            $url = "http://127.0.0.1:$env:PORT/health"
             $maxAttempts = 10
 
             for (
