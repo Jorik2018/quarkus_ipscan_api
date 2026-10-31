@@ -23,18 +23,15 @@ import io.smallrye.common.annotation.Blocking;
 @Produces(MediaType.APPLICATION_JSON)
 public class GreetingResource {
 
-    private static final String SCANNER_PATH_1 =
-            "C:\\Program Files (x86)\\Advanced IP Scanner\\advanced_ip_scanner_console.exe";
-
-    private static final String SCANNER_PATH_2 =
+    private static final String SCANNER_PATH =
             "D:\\Advanced IP Scanner\\advanced_ip_scanner_console.exe";
 
-    private static final long SCAN_TIMEOUT_SECONDS = 60;
+    private static final long SCAN_TIMEOUT_SECONDS = 120;
 
 
     /*
      * ============================================================
-     * HEALTH CHECK
+     * HEALTH
      * ============================================================
      */
 
@@ -42,10 +39,13 @@ public class GreetingResource {
     @Path("/health")
     public Response health() {
 
+        File scanner = new File(SCANNER_PATH);
+
         return Response.ok(
                 Map.of(
                         "status", "UP",
-                        "service", "quarkus-ipscan-api"
+                        "service", "quarkus-ipscan-api",
+                        "scannerAvailable", scanner.exists()
                 )
         ).build();
     }
@@ -53,7 +53,7 @@ public class GreetingResource {
 
     /*
      * ============================================================
-     * IP SCAN
+     * SCAN
      * ============================================================
      */
 
@@ -63,92 +63,73 @@ public class GreetingResource {
     @Blocking
     public Response scan(ScanRequest request) {
 
-        /*
-         * Validar request
-         */
-
         if (request == null ||
                 request.range() == null ||
                 request.range().isBlank()) {
 
             return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(
-                            Map.of(
-                                    "error", "range is required"
-                            )
-                    )
+                    .entity(Map.of(
+                            "error", "range is required"
+                    ))
                     .build();
         }
 
-        String range = request.range().trim();
+        String range = request.range()
+                .trim()
+                .replaceAll("\\s+", "");
+
 
         /*
-         * Validación básica.
-         *
-         * Advanced IP Scanner admite rangos como:
-         *
-         * 172.16.1.1-172.16.1.254
-         *
-         * Evitamos enviar caracteres arbitrarios al ejecutable.
+         * Solo permitimos caracteres esperados para IP/rango.
          */
 
         if (!range.matches("[0-9.\\-/]+")) {
 
             return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(
-                            Map.of(
-                                    "error", "Invalid IP range"
-                            )
+                    .entity(Map.of(
+                            "error", "Invalid IP range"
+                    ))
+                    .build();
+        }
+
+
+        File scanner = new File(SCANNER_PATH);
+
+        if (!scanner.exists()) {
+
+            return Response.status(
+                            Response.Status.INTERNAL_SERVER_ERROR
                     )
+                    .entity(Map.of(
+                            "error",
+                            "Advanced IP Scanner executable not found",
+                            "path",
+                            SCANNER_PATH
+                    ))
                     .build();
         }
 
 
         /*
-         * Buscar Advanced IP Scanner
-         */
-
-        File scanner = findScanner();
-
-        if (scanner == null) {
-
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                    .entity(
-                            Map.of(
-                                    "error",
-                                    "Advanced IP Scanner executable not found"
-                            )
-                    )
-                    .build();
-        }
-
-
-        /*
-         * Construir comando
+         * /r = rango
+         * /v = incluir service scan
          */
 
         ProcessBuilder processBuilder = new ProcessBuilder(
                 scanner.getAbsolutePath(),
-                "/r:" + range
+                "/r:" + range,
+                "/v"
         );
-
-        /*
-         * stderr se mezcla con stdout para evitar que el proceso
-         * se quede bloqueado si llena el buffer de errores.
-         */
 
         processBuilder.redirectErrorStream(true);
 
-        List<Map<String, String>> results = new ArrayList<>();
+        List<Map<String, Object>> results =
+                new ArrayList<>();
 
 
         try {
 
             Process process = processBuilder.start();
-
-            /*
-             * Leer salida del scanner.
-             */
 
             try (
                     BufferedReader reader =
@@ -159,35 +140,31 @@ public class GreetingResource {
                             )
             ) {
 
-                String line = reader.readLine();
-
                 /*
-                 * Scanner sin salida
+                 * Primera línea:
+                 *
+                 * Status | Name | Type | Operating system |
+                 * IP | NetBIOS name | ...
                  */
 
-                if (line == null) {
+                String header = reader.readLine();
+
+                if (header == null) {
 
                     process.destroyForcibly();
 
                     return Response.status(
                                     Response.Status.INTERNAL_SERVER_ERROR
                             )
-                            .entity(
-                                    Map.of(
-                                            "error",
-                                            "Scanner returned no output"
-                                    )
-                            )
+                            .entity(Map.of(
+                                    "error",
+                                    "Scanner returned no output"
+                            ))
                             .build();
                 }
 
 
-                /*
-                 * Primera línea = encabezados.
-                 *
-                 * Actualmente no necesitamos utilizarlos,
-                 * pero la consumimos antes de procesar resultados.
-                 */
+                String line;
 
                 while ((line = reader.readLine()) != null) {
 
@@ -195,7 +172,7 @@ public class GreetingResource {
                         continue;
                     }
 
-                    Map<String, String> result =
+                    Map<String, Object> result =
                             parseScannerLine(line);
 
                     if (result != null) {
@@ -204,10 +181,6 @@ public class GreetingResource {
                 }
             }
 
-
-            /*
-             * Esperar finalización con timeout.
-             */
 
             boolean finished = process.waitFor(
                     SCAN_TIMEOUT_SECONDS,
@@ -221,19 +194,13 @@ public class GreetingResource {
                 return Response.status(
                                 Response.Status.GATEWAY_TIMEOUT
                         )
-                        .entity(
-                                Map.of(
-                                        "error",
-                                        "Scanner timeout"
-                                )
-                        )
+                        .entity(Map.of(
+                                "error",
+                                "Scanner timeout"
+                        ))
                         .build();
             }
 
-
-            /*
-             * Comprobar código de salida.
-             */
 
             int exitCode = process.exitValue();
 
@@ -242,21 +209,15 @@ public class GreetingResource {
                 return Response.status(
                                 Response.Status.INTERNAL_SERVER_ERROR
                         )
-                        .entity(
-                                Map.of(
-                                        "error",
-                                        "Scanner failed",
-                                        "exitCode",
-                                        exitCode
-                                )
-                        )
+                        .entity(Map.of(
+                                "error",
+                                "Scanner failed",
+                                "exitCode",
+                                exitCode
+                        ))
                         .build();
             }
 
-
-            /*
-             * Respuesta correcta.
-             */
 
             return Response.ok(results).build();
 
@@ -268,16 +229,14 @@ public class GreetingResource {
             return Response.status(
                             Response.Status.INTERNAL_SERVER_ERROR
                     )
-                    .entity(
-                            Map.of(
-                                    "error",
-                                    "Error executing scanner",
-                                    "message",
-                                    e.getMessage() != null
-                                            ? e.getMessage()
-                                            : "Unknown error"
-                            )
-                    )
+                    .entity(Map.of(
+                            "error",
+                            "Error executing scanner",
+                            "message",
+                            e.getMessage() != null
+                                    ? e.getMessage()
+                                    : "Unknown error"
+                    ))
                     .build();
         }
     }
@@ -285,41 +244,16 @@ public class GreetingResource {
 
     /*
      * ============================================================
-     * FIND SCANNER
+     * PARSER
      * ============================================================
      */
 
-    private File findScanner() {
-
-        File scanner = new File(SCANNER_PATH_1);
-
-        if (scanner.exists()) {
-            return scanner;
-        }
-
-        scanner = new File(SCANNER_PATH_2);
-
-        if (scanner.exists()) {
-            return scanner;
-        }
-
-        return null;
-    }
-
-
-    /*
-     * ============================================================
-     * PARSE ADVANCED IP SCANNER OUTPUT
-     * ============================================================
-     */
-
-    private Map<String, String> parseScannerLine(String line) {
+    private Map<String, Object> parseScannerLine(
+            String line
+    ) {
 
         /*
-         * -1 conserva columnas vacías.
-         *
-         * Esto es importante porque Advanced IP Scanner
-         * puede devolver campos vacíos entre pipes.
+         * -1 mantiene columnas vacías.
          */
 
         String[] values = line.split("\\|", -1);
@@ -328,15 +262,27 @@ public class GreetingResource {
             return null;
         }
 
+
         String status = values[0].trim();
 
-        Map<String, String> result = new LinkedHashMap<>();
+        Map<String, Object> result =
+                new LinkedHashMap<>();
 
         result.put("status", status);
 
 
         /*
-         * Líneas correspondientes a servicios detectados.
+         * ========================================================
+         * SERVICE
+         *
+         * service | IP | tipo | descripción
+         *
+         * Ejemplo:
+         *
+         * service | 172.16.1.244 |
+         * HTTP |
+         * IIS Windows (Microsoft IIS httpd 10.0)
+         * ========================================================
          */
 
         if ("service".equalsIgnoreCase(status)) {
@@ -345,10 +291,31 @@ public class GreetingResource {
                 return null;
             }
 
-            result.put("name", values[1].trim());
-            result.put("type", values[2].trim());
             result.put(
-                    "operatingSystem",
+                    "ip",
+                    values[1].trim()
+            );
+
+            String service = values[2].trim();
+
+            /*
+             * Advanced IP Scanner devuelve "?"
+             * cuando no identifica el tipo.
+             */
+
+            if (service.isEmpty() ||
+                    "?".equals(service)) {
+
+                service = "unknown";
+            }
+
+            result.put(
+                    "service",
+                    service
+            );
+
+            result.put(
+                    "description",
                     values[3].trim()
             );
 
@@ -357,12 +324,23 @@ public class GreetingResource {
 
 
         /*
-         * Equipos/IPs normales.
+         * ========================================================
+         * HOST
+         *
+         * status
+         * name
+         * ip
+         * netBIOSName
+         * netBIOSGroup
+         * manufacturer
+         * macAddress
+         * ========================================================
          */
 
         if (values.length < 7) {
             return null;
         }
+
 
         result.put(
                 "name",
@@ -389,10 +367,20 @@ public class GreetingResource {
                 values[5].trim()
         );
 
+        String mac = values[6].trim();
+
+        /*
+         * 00:00:00:00:00:00 realmente significa
+         * que no conocemos la MAC.
+         */
+
         result.put(
                 "macAddress",
-                values[6].trim()
+                "00:00:00:00:00:00".equals(mac)
+                        ? null
+                        : mac
         );
+
 
         return result;
     }
@@ -400,7 +388,7 @@ public class GreetingResource {
 
     /*
      * ============================================================
-     * REQUEST DTO
+     * REQUEST
      * ============================================================
      */
 
@@ -409,30 +397,3 @@ public class GreetingResource {
     ) {
     }
 }
-/*Status 	| Name 		| Type 			| Operating system 	| IP 			| NetBIOS name 		| NetBIOS group | Manufacturer 		| MAC address 			| User
-alive 	| GRAD02 										| 172.16.1.197 	| GRAD02 			| GRAD 			| Hewlett Packard 	| 2C:44:FD:2E:E6:43    	|
-alive 	| SGADF09 										| 172.16.1.242 	| SGADF09 			| SGADF 		| Inventec 			| 00:26:6C:28:B5:38 	|
-alive 	| 172.16.2.47 									| 172.16.2.47 	|  					|  				|  					| 50:81:40:9D:23:6C |
-alive 	| 172.16.2.58 									| 172.16.2.58 	|  					|  				|  					| 96:5A:D9:58:D7:7E |
-alive 	| 172.16.2.64 									| 172.16.2.64 	|  					|  				|  					| E0:70:EA:A4:44:33 |
-unknown | 172.16.2.153 									| 172.16.2.153 	|  					|  				|  					| 00:00:00:00:00:00 |
-unknown | 172.16.2.154 									| 172.16.2.154 	|  					|  				|  					| 00:00:00:00:00:00 |
-unknown | 172.16.2.152 									| 172.16.2.152 	|  					|  				|  					| 00:00:00:00:00:00 |
-unknown | 172.16.2.155 									| 172.16.2.155 	|  					|  				|  					| 00:00:00:00:00:00 |
-service | 172.16.1.244 | ? | IIS Windows (Microsoft IIS httpd 10.0)
-service | 172.16.1.244 | HTTP | IIS Windows (Microsoft IIS httpd 10.0)
-service | 172.16.1.244 | ? | Windows
-service | 172.16.1.239 | ? | IIS Windows (Microsoft IIS httpd 10.0)
-service | 172.16.1.239 | HTTP | IIS Windows (Microsoft IIS httpd 10.0)
-service | 172.16.1.239 | ? | Windows
-service | 172.16.1.200 | ? | IIS Windows (Microsoft IIS httpd 8.5)
-service | 172.16.1.200 | HTTP | IIS Windows (Microsoft IIS httpd 8.5)
-service | 172.16.1.200 | ? | Windows
-*/
-
-
-        //File f = new File("C:\\Program Files (x86)\\Advanced IP Scanner\\advanced_ip_scanner_console.exe");
-        //if (!f.exists())
-          //  f = new File("D:\\Advanced IP Scanner\\advanced_ip_scanner_console.exe");
-
-      
