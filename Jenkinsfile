@@ -21,6 +21,38 @@ pipeline {
     }
 
     stages {
+        stage('Advanced IP Scanner Help') {
+    steps {
+        bat '''
+            @echo off
+
+            echo ==========================================
+            echo ===== Advanced IP Scanner CLI Help =======
+            echo ==========================================
+
+            set "SCANNER=D:\\Advanced IP Scanner\\advanced_ip_scanner_console.exe"
+
+            if not exist "%SCANNER%" (
+                echo ERROR: Advanced IP Scanner no encontrado:
+                echo %SCANNER%
+                exit /b 1
+            )
+
+            echo Executable:
+            echo %SCANNER%
+            echo.
+
+            echo ===== --help =====
+            "%SCANNER%" --help
+
+            echo.
+            echo ===== END =====
+
+            REM No hacemos fallar Jenkins si --help devuelve codigo distinto de 0
+            exit /b 0
+        '''
+    }
+}
 
         stage('Checkout') {
             steps {
