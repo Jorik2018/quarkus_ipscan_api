@@ -379,7 +379,7 @@ stage('Configure Service') {
 
                 # Vault KV v2:
                 # response.data.data.JWT_PUBLIC_KEY
-                $jwtPublicKey = $response.data.data.JWT_PUBLIC_KEY
+                $jwtPublicKey = $response.data.data.JWT_PUBLIC_KEY_LOCATION
 
                 if (-not $jwtPublicKey) {
                     throw "JWT_PUBLIC_KEY not found in Vault"
