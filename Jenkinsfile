@@ -341,37 +341,68 @@ stage('Configure Service') {
                 Write-Host "===== Load Vault Config ======"
                 Write-Host "=============================="
 
+                # Validar configuracion
+                if (-not $env:VAULT_ADDR) {
+                    throw "VAULT_ADDR not configured"
+                }
+
+                if (-not $env:VAULT_PATH) {
+                    throw "VAULT_PATH not configured"
+                }
+
+                if (-not $env:VAULT_TOKEN) {
+                    throw "VAULT_TOKEN not available"
+                }
+
                 $headers = @{
                     "X-Vault-Token" = $env:VAULT_TOKEN
                 }
 
-                $vaultUrl = "$env:VAULT_ADDR/v1/$env:VAULT_PATH"
+                # VAULT_PATH ya contiene:
+                # /v1/secret/data/global
+                $vaultUrl = "$env:VAULT_ADDR$env:VAULT_PATH"
 
                 Write-Host "Vault: $vaultUrl"
 
-                $response = Invoke-RestMethod `
-                    -Method GET `
-                    -Uri $vaultUrl `
-                    -Headers $headers `
-                    -TimeoutSec 10
+                try {
+                    $response = Invoke-RestMethod `
+                        -Method GET `
+                        -Uri $vaultUrl `
+                        -Headers $headers `
+                        -TimeoutSec 10
+                }
+                catch {
+                    Write-Host "ERROR reading Vault:"
+                    Write-Host $_.Exception.Message
+                    throw "Could not read Vault configuration"
+                }
 
-                # Vault KV v2
+                # Vault KV v2:
+                # response.data.data.JWT_PUBLIC_KEY
                 $jwtPublicKey = $response.data.data.JWT_PUBLIC_KEY
 
                 if (-not $jwtPublicKey) {
                     throw "JWT_PUBLIC_KEY not found in Vault"
                 }
 
-                Write-Host "JWT_PUBLIC_KEY loaded from Vault."
+                Write-Host "JWT_PUBLIC_KEY loaded from Vault successfully."
 
-                # Nunca imprimir el valor
-
-                $javaExe = "$env:JAVA_HOME\\bin\\java.exe"
+                # Nunca imprimir $jwtPublicKey
 
                 Write-Host ""
                 Write-Host "=============================="
                 Write-Host "===== Configure Service ======"
                 Write-Host "=============================="
+
+                $javaExe = "$env:JAVA_HOME\\bin\\java.exe"
+
+                if (-not (Test-Path $javaExe)) {
+                    throw "Java executable not found: $javaExe"
+                }
+
+                Write-Host "Java: $javaExe"
+                Write-Host "Service: $env:SERVICE_ID"
+                Write-Host "Port: $env:PORT"
 
                 & "$env:PYTHON_HOME\\python.exe" `
                     "$env:SERVICE_MANAGER" `
@@ -388,6 +419,8 @@ stage('Configure Service') {
                 if ($LASTEXITCODE -ne 0) {
                     throw "Service configuration failed"
                 }
+
+                Write-Host "Service configured successfully."
             '''
         }
     }
