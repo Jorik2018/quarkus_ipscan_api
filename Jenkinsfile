@@ -382,50 +382,55 @@ stage('Cleanup Old Service') {
             }
         }
 
-        stage('Health Check') {
-            steps {
-                powershell '''
-                    $url = "http://127.0.0.1:$env:PORT/"
-                    $maxAttempts = 10
+stage('Health Check') {
+    steps {
+        powershell '''
+            $url = "http://127.0.0.1:$env:PORT/json/"
+            $maxAttempts = 10
 
-                    for (
-                        $attempt = 1;
-                        $attempt -le $maxAttempts;
-                        $attempt++
-                    ) {
+            for (
+                $attempt = 1;
+                $attempt -le $maxAttempts;
+                $attempt++
+            ) {
 
+                Write-Host "===================================="
+                Write-Host "Health check $attempt/$maxAttempts"
+                Write-Host "GET $url"
+
+                try {
+
+                    $response = Invoke-WebRequest `
+                        -UseBasicParsing `
+                        -Uri $url `
+                        -TimeoutSec 10
+
+                    Write-Host "HTTP: $($response.StatusCode)"
+                    Write-Host "Response: $($response.Content)"
+
+                    if ($response.StatusCode -eq 200) {
                         Write-Host "===================================="
-                        Write-Host "Health check $attempt/$maxAttempts"
-                        Write-Host "GET $url"
-
-                        try {
-
-                            $response = Invoke-WebRequest `
-                                -UseBasicParsing `
-                                -Uri $url `
-                                -TimeoutSec 10
-
-                            Write-Host "HTTP: $($response.StatusCode)"
-
-                            if ($response.StatusCode -eq 200) {
-                                Write-Host "Quarkus IP Scan API OK"
-                                exit 0
-                            }
-
-                        }
-                        catch {
-                            Write-Host $_.Exception.Message
-                        }
-
-                        if ($attempt -lt $maxAttempts) {
-                            Start-Sleep -Seconds 3
-                        }
+                        Write-Host "Quarkus IP Scan API OK"
+                        Write-Host "===================================="
+                        exit 0
                     }
 
-                    throw "Quarkus IP Scan API failed health check."
-                '''
+                }
+                catch {
+                    Write-Host "Health check failed:"
+                    Write-Host $_.Exception.Message
+                }
+
+                if ($attempt -lt $maxAttempts) {
+                    Write-Host "Retrying in 3 seconds..."
+                    Start-Sleep -Seconds 3
+                }
             }
-        }
+
+            throw "Quarkus IP Scan API failed health check after $maxAttempts attempts."
+        '''
+    }
+}
     }
 
     post {
