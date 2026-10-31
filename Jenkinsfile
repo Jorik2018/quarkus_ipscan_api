@@ -411,7 +411,6 @@ stage('Configure Service') {
                     "$env:DEPLOY_DIR" `
                     --name "$env:SERVICE_NAME" `
                     --description "$env:SERVICE_DESCRIPTION" `
-                    --type rust `
                     --executable "$javaExe" `
                     --args "-Dquarkus.http.port=$env:PORT -jar quarkus-run.jar" `
                     --env "JWT_PUBLIC_KEY=$jwtPublicKey"
