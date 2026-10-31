@@ -8,7 +8,7 @@ pipeline {
     }
 
     environment {
-        SERVICE_ID = 'quarkus-ipscan-api'
+        SERVICE_ID = 'quarkus_ipscan_api'
         SERVICE_NAME = 'Quarkus IP Scan API'
         SERVICE_DESCRIPTION = 'Quarkus IP Scan API'
 
