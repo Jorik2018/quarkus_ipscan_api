@@ -128,24 +128,29 @@ stage('Remove Old Service') {
             "%PYTHON_HOME%\\python.exe" ^
                 "%SERVICE_MANAGER%" ^
                 uninstall ^
-                "%SERVICE_ID%"
+                "%SERVICE_ID%" ^
+                "%DEPLOY_DIR%"
+
+            if errorlevel 1 (
+                echo ERROR: Could not uninstall old service
+                exit /b 1
+            )
 
             timeout /t 3 /nobreak >nul
 
             echo.
             echo ===== Service status =====
-
             sc query "%SERVICE_ID%"
 
             echo.
             echo ===== Port status =====
-
             netstat -ano | findstr ":%PORT%"
 
             exit /b 0
         '''
     }
 }
+
         stage('Build') {
             steps {
                 bat '''
