@@ -108,7 +108,81 @@ pipeline {
                 '''
             }
         }
+stage('Cleanup Old Service') {
+    steps {
+        powershell '''
+            Write-Host "============================"
+            Write-Host "===== Cleanup Service ======"
+            Write-Host "============================"
 
+            $serviceId = $env:SERVICE_ID
+            $serviceName = $env:SERVICE_NAME
+            $port = [int]$env:PORT
+
+            # Buscar por ID o DisplayName
+            $services = Get-CimInstance Win32_Service |
+                Where-Object {
+                    $_.Name -eq $serviceId -or
+                    $_.DisplayName -eq $serviceName
+                }
+
+            foreach ($service in $services) {
+
+                Write-Host ""
+                Write-Host "Servicio encontrado:"
+                Write-Host "  ID:          $($service.Name)"
+                Write-Host "  DisplayName: $($service.DisplayName)"
+                Write-Host "  State:       $($service.State)"
+                Write-Host "  Path:        $($service.PathName)"
+
+                if ($service.State -ne "Stopped") {
+                    Write-Host "Deteniendo $($service.Name)..."
+                    sc.exe stop $service.Name
+                    Start-Sleep -Seconds 2
+                }
+
+                Write-Host "Eliminando $($service.Name)..."
+                sc.exe delete $service.Name
+
+                Start-Sleep -Seconds 2
+            }
+
+            Write-Host ""
+            Write-Host "===== Checking Port $port ====="
+
+            $connections = Get-NetTCPConnection `
+                -LocalPort $port `
+                -State Listen `
+                -ErrorAction SilentlyContinue
+
+            $processIds = $connections |
+                Select-Object -ExpandProperty OwningProcess -Unique
+
+            foreach ($processId in $processIds) {
+
+                Write-Host "Killing orphan PID $processId"
+
+                Stop-Process `
+                    -Id $processId `
+                    -Force `
+                    -ErrorAction SilentlyContinue
+            }
+
+            Start-Sleep -Seconds 2
+
+            $remaining = Get-NetTCPConnection `
+                -LocalPort $port `
+                -State Listen `
+                -ErrorAction SilentlyContinue
+
+            if ($remaining) {
+                throw "Port $port is still occupied."
+            }
+
+            Write-Host "Port $port is free."
+        '''
+    }
+}
         stage('Build') {
             steps {
                 bat '''
