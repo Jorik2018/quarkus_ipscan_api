@@ -84,6 +84,44 @@ stage('Advanced IP Scanner CLI Discovery') {
     }
 }
 
+stage('Advanced IP Scanner Service Scan Test') {
+    steps {
+        bat '''
+            @echo off
+
+            set "SCANNER=D:\\Advanced IP Scanner\\advanced_ip_scanner_console.exe"
+            set "RANGE=172.16.1.200-172.16.1.244"
+
+            echo ==========================================
+            echo ===== NORMAL SCAN ========================
+            echo ==========================================
+
+            "%SCANNER%" /r:%RANGE%
+
+            echo.
+            echo ==========================================
+            echo ===== SERVICE SCAN /v ====================
+            echo ==========================================
+
+            "%SCANNER%" /r:%RANGE% /v
+
+            echo.
+            echo ==========================================
+            echo ===== GROUPED SERVICE SCAN /v2 ===========
+            echo ==========================================
+
+            "%SCANNER%" /r:%RANGE% /v2
+
+            echo.
+            echo ==========================================
+            echo ===== END ================================
+            echo ==========================================
+
+            exit /b 0
+        '''
+    }
+}
+
         stage('Checkout') {
             steps {
                 checkout scm
