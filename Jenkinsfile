@@ -109,15 +109,26 @@ pipeline {
             }
         }
 
-stage('Remove Old Service') {
+stage('Cleanup Old Service') {
     steps {
         bat '''
             @echo off
 
             echo ============================
-            echo ===== Remove Old Service ===
+            echo ===== Cleanup Service ======
             echo ============================
 
+            REM Verificar si el servicio existe
+            sc query "%SERVICE_ID%" >nul 2>&1
+
+            if errorlevel 1 (
+                echo Service "%SERVICE_ID%" does not exist.
+                goto CHECK_PORT
+            )
+
+            echo Service "%SERVICE_ID%" exists.
+
+            REM Intentar detenerlo
             "%PYTHON_HOME%\\python.exe" ^
                 "%SERVICE_MANAGER%" ^
                 stop ^
@@ -125,28 +136,51 @@ stage('Remove Old Service') {
 
             timeout /t 3 /nobreak >nul
 
-            "%PYTHON_HOME%\\python.exe" ^
-                "%SERVICE_MANAGER%" ^
-                uninstall ^
-                "%SERVICE_ID%" ^
-                "%DEPLOY_DIR%"
+            REM Si existe service.xml, intentar uninstall normal
+            if exist "%DEPLOY_DIR%\\service.xml" (
+                echo service.xml encontrado. Intentando uninstall normal...
 
-            if errorlevel 1 (
-                echo ERROR: Could not uninstall old service
+                "%PYTHON_HOME%\\python.exe" ^
+                    "%SERVICE_MANAGER%" ^
+                    uninstall ^
+                    "%SERVICE_ID%" ^
+                    "%DEPLOY_DIR%"
+
+                timeout /t 2 /nobreak >nul
+            ) else (
+                echo WARNING: service.xml no existe.
+                echo La instalacion WinSW anterior esta incompleta.
+            )
+
+            REM Comprobar si sigue registrado
+            sc query "%SERVICE_ID%" >nul 2>&1
+
+            if not errorlevel 1 (
+                echo Eliminando registro viejo del servicio...
+                sc delete "%SERVICE_ID%"
+                timeout /t 3 /nobreak >nul
+            )
+
+            :CHECK_PORT
+
+            echo.
+            echo ===== Checking Port %PORT% =====
+
+            for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":%PORT%" ^| findstr "LISTENING"') do (
+                echo Killing orphan process PID %%a
+                taskkill /PID %%a /F
+            )
+
+            timeout /t 2 /nobreak >nul
+
+            netstat -ano | findstr ":%PORT%" | findstr "LISTENING"
+
+            if not errorlevel 1 (
+                echo ERROR: Port %PORT% is still occupied.
                 exit /b 1
             )
 
-            timeout /t 3 /nobreak >nul
-
-            echo.
-            echo ===== Service status =====
-            sc query "%SERVICE_ID%"
-
-            echo.
-            echo ===== Port status =====
-            netstat -ano | findstr ":%PORT%"
-
-            exit /b 0
+            echo Port %PORT% is free.
         '''
     }
 }
