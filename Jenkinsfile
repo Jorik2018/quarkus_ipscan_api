@@ -19,6 +19,7 @@ pipeline {
         // El proyecto Quarkus esta compilado para Java 17
         JAVA_HOME = 'D:\\java\\jdk-17.0.5+8'
         PATH = "${JAVA_HOME}\\bin;${env.PATH}"
+        VAULT_PATH = '/v1/secret/data/global'
     }
 
 
