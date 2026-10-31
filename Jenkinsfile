@@ -21,34 +21,64 @@ pipeline {
     }
 
     stages {
-        stage('Advanced IP Scanner Help') {
+
+stage('Advanced IP Scanner CLI Discovery') {
     steps {
         bat '''
             @echo off
 
-            echo ==========================================
-            echo ===== Advanced IP Scanner CLI Help =======
-            echo ==========================================
-
             set "SCANNER=D:\\Advanced IP Scanner\\advanced_ip_scanner_console.exe"
 
+            echo ==========================================
+            echo ===== Advanced IP Scanner CLI Discovery ==
+            echo ==========================================
+
             if not exist "%SCANNER%" (
-                echo ERROR: Advanced IP Scanner no encontrado:
+                echo ERROR: Scanner no encontrado:
                 echo %SCANNER%
                 exit /b 1
             )
 
-            echo Executable:
-            echo %SCANNER%
             echo.
-
-            echo ===== --help =====
-            "%SCANNER%" --help
+            echo ===== SIN ARGUMENTOS =====
+            "%SCANNER%"
+            echo ExitCode: %ERRORLEVEL%
 
             echo.
-            echo ===== END =====
+            echo ===== /? =====
+            "%SCANNER%" /?
+            echo ExitCode: %ERRORLEVEL%
 
-            REM No hacemos fallar Jenkins si --help devuelve codigo distinto de 0
+            echo.
+            echo ===== -? =====
+            "%SCANNER%" -?
+            echo ExitCode: %ERRORLEVEL%
+
+            echo.
+            echo ===== /help =====
+            "%SCANNER%" /help
+            echo ExitCode: %ERRORLEVEL%
+
+            echo.
+            echo ===== -help =====
+            "%SCANNER%" -help
+            echo ExitCode: %ERRORLEVEL%
+
+            echo.
+            echo ===== -h =====
+            "%SCANNER%" -h
+            echo ExitCode: %ERRORLEVEL%
+
+            echo.
+            echo ===== /h =====
+            "%SCANNER%" /h
+            echo ExitCode: %ERRORLEVEL%
+
+            echo.
+            echo ==========================================
+            echo ===== FIN CLI DISCOVERY ==================
+            echo ==========================================
+
             exit /b 0
         '''
     }
