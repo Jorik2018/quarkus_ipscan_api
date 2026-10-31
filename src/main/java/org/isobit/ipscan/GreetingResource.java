@@ -80,7 +80,13 @@ public class GreetingResource {
 
 
         /*
-         * Solo permitimos caracteres esperados para IP/rango.
+         * Aceptamos:
+         *
+         * 172.16.1.244
+         * 172.16.1.1-172.16.1.254
+         *
+         * También dejamos "/" porque el scanner podría admitir
+         * formatos de red compatibles.
          */
 
         if (!range.matches("[0-9.\\-/]+")) {
@@ -111,8 +117,8 @@ public class GreetingResource {
 
 
         /*
-         * /r = rango
-         * /v = incluir service scan
+         * /r = IP o rango
+         * /v = incluir descubrimiento de servicios
          */
 
         ProcessBuilder processBuilder = new ProcessBuilder(
@@ -123,8 +129,35 @@ public class GreetingResource {
 
         processBuilder.redirectErrorStream(true);
 
-        List<Map<String, Object>> results =
-                new ArrayList<>();
+
+        /*
+         * hostsByIp conserva el orden en el que aparecen los hosts.
+         *
+         * Ejemplo:
+         *
+         * 172.16.1.244 -> {
+         *     status,
+         *     name,
+         *     ip,
+         *     ...
+         *     services: []
+         * }
+         */
+
+        Map<String, Map<String, Object>> hostsByIp =
+                new LinkedHashMap<>();
+
+
+        /*
+         * Advanced IP Scanner normalmente escribe primero hosts y
+         * posteriormente servicios.
+         *
+         * De todas formas guardamos servicios pendientes por si
+         * alguna versión devuelve un service antes que su host.
+         */
+
+        Map<String, List<Map<String, String>>> pendingServices =
+                new LinkedHashMap<>();
 
 
         try {
@@ -141,10 +174,7 @@ public class GreetingResource {
             ) {
 
                 /*
-                 * Primera línea:
-                 *
-                 * Status | Name | Type | Operating system |
-                 * IP | NetBIOS name | ...
+                 * Primera línea = encabezado.
                  */
 
                 String header = reader.readLine();
@@ -172,15 +202,18 @@ public class GreetingResource {
                         continue;
                     }
 
-                    Map<String, Object> result =
-                            parseScannerLine(line);
-
-                    if (result != null) {
-                        results.add(result);
-                    }
+                    parseAndAddLine(
+                            line,
+                            hostsByIp,
+                            pendingServices
+                    );
                 }
             }
 
+
+            /*
+             * Esperar que termine el proceso.
+             */
 
             boolean finished = process.waitFor(
                     SCAN_TIMEOUT_SECONDS,
@@ -219,6 +252,14 @@ public class GreetingResource {
             }
 
 
+            /*
+             * Convertimos el mapa en array JSON.
+             */
+
+            List<Map<String, Object>> results =
+                    new ArrayList<>(hostsByIp.values());
+
+
             return Response.ok(results).build();
 
         }
@@ -244,38 +285,34 @@ public class GreetingResource {
 
     /*
      * ============================================================
-     * PARSER
+     * PARSE AND GROUP
      * ============================================================
      */
 
-    private Map<String, Object> parseScannerLine(
-            String line
+    private void parseAndAddLine(
+            String line,
+            Map<String, Map<String, Object>> hostsByIp,
+            Map<String, List<Map<String, String>>> pendingServices
     ) {
 
         /*
-         * -1 mantiene columnas vacías.
+         * -1 conserva columnas vacías.
          */
 
         String[] values = line.split("\\|", -1);
 
         if (values.length == 0) {
-            return null;
+            return;
         }
 
-
         String status = values[0].trim();
-
-        Map<String, Object> result =
-                new LinkedHashMap<>();
-
-        result.put("status", status);
 
 
         /*
          * ========================================================
          * SERVICE
          *
-         * service | IP | tipo | descripción
+         * service | IP | type | description
          *
          * Ejemplo:
          *
@@ -288,107 +325,207 @@ public class GreetingResource {
         if ("service".equalsIgnoreCase(status)) {
 
             if (values.length < 4) {
-                return null;
+                return;
             }
 
-            result.put(
-                    "ip",
-                    values[1].trim()
-            );
+            String ip = values[1].trim();
 
-            String service = values[2].trim();
-
-            /*
-             * Advanced IP Scanner devuelve "?"
-             * cuando no identifica el tipo.
-             */
-
-            if (service.isEmpty() ||
-                    "?".equals(service)) {
-
-                service = "unknown";
+            if (ip.isEmpty()) {
+                return;
             }
 
-            result.put(
+            String serviceType = values[2].trim();
+
+            if (serviceType.isEmpty() ||
+                    "?".equals(serviceType)) {
+
+                serviceType = "unknown";
+            }
+
+
+            Map<String, String> service =
+                    new LinkedHashMap<>();
+
+            service.put(
                     "service",
-                    service
+                    serviceType
             );
 
-            result.put(
+            service.put(
                     "description",
                     values[3].trim()
             );
 
-            return result;
+
+            /*
+             * Si el host ya existe, agregamos directamente
+             * el servicio.
+             */
+
+            Map<String, Object> host =
+                    hostsByIp.get(ip);
+
+            if (host != null) {
+
+                getServices(host).add(service);
+
+            }
+            else {
+
+                /*
+                 * Si todavía no apareció el host,
+                 * guardamos temporalmente el servicio.
+                 */
+
+                pendingServices
+                        .computeIfAbsent(
+                                ip,
+                                key -> new ArrayList<>()
+                        )
+                        .add(service);
+            }
+
+            return;
         }
 
 
         /*
          * ========================================================
          * HOST
-         *
-         * status
-         * name
-         * ip
-         * netBIOSName
-         * netBIOSGroup
-         * manufacturer
-         * macAddress
          * ========================================================
          */
 
         if (values.length < 7) {
-            return null;
+            return;
         }
 
 
-        result.put(
+        String ip = values[2].trim();
+
+        if (ip.isEmpty()) {
+            return;
+        }
+
+
+        Map<String, Object> host =
+                new LinkedHashMap<>();
+
+
+        host.put(
+                "status",
+                status
+        );
+
+        host.put(
                 "name",
-                values[1].trim()
+                emptyToNull(values[1])
         );
 
-        result.put(
+        host.put(
                 "ip",
-                values[2].trim()
+                ip
         );
 
-        result.put(
+        host.put(
                 "netBIOSName",
-                values[3].trim()
+                emptyToNull(values[3])
         );
 
-        result.put(
+        host.put(
                 "netBIOSGroup",
-                values[4].trim()
+                emptyToNull(values[4])
         );
 
-        result.put(
+        host.put(
                 "manufacturer",
-                values[5].trim()
+                emptyToNull(values[5])
         );
+
 
         String mac = values[6].trim();
 
-        /*
-         * 00:00:00:00:00:00 realmente significa
-         * que no conocemos la MAC.
-         */
-
-        result.put(
+        host.put(
                 "macAddress",
-                "00:00:00:00:00:00".equals(mac)
+                mac.isEmpty() ||
+                        "00:00:00:00:00:00".equals(mac)
                         ? null
                         : mac
         );
 
 
-        return result;
+        /*
+         * Todos los hosts tienen services,
+         * aunque esté vacío.
+         */
+
+        List<Map<String, String>> services =
+                new ArrayList<>();
+
+        host.put(
+                "services",
+                services
+        );
+
+
+        /*
+         * Si anteriormente aparecieron servicios para esta IP,
+         * los agregamos ahora.
+         */
+
+        List<Map<String, String>> pending =
+                pendingServices.remove(ip);
+
+        if (pending != null) {
+            services.addAll(pending);
+        }
+
+
+        hostsByIp.put(
+                ip,
+                host
+        );
     }
 
 
     /*
      * ============================================================
-     * REQUEST
+     * SERVICES HELPER
+     * ============================================================
+     */
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, String>> getServices(
+            Map<String, Object> host
+    ) {
+
+        return (List<Map<String, String>>)
+                host.get("services");
+    }
+
+
+    /*
+     * ============================================================
+     * EMPTY -> NULL
+     * ============================================================
+     */
+
+    private String emptyToNull(String value) {
+
+        if (value == null) {
+            return null;
+        }
+
+        String result = value.trim();
+
+        return result.isEmpty()
+                ? null
+                : result;
+    }
+
+
+    /*
+     * ============================================================
+     * REQUEST DTO
      * ============================================================
      */
 
